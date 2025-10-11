@@ -2,14 +2,15 @@
 import { createClient } from "@/lib/supabase/server"
 import { initializeBoard } from "@/lib/game-logic"
 
-export async function findOrCreateGameServer(userId: string) {
+export async function findOrCreateGameServer(userId: string, gameType: string) {
   const supabase = await createClient()
 
-  // First, check if there's a waiting game
+  // First, check if there's a waiting game with the same game type
   const { data: waitingGames, error: searchError } = await supabase
     .from("games")
     .select("*")
     .eq("status", "waiting")
+    .eq("game_type", gameType)
     .is("player2_id", null)
     .neq("player1_id", userId)
     .limit(1)
@@ -53,7 +54,7 @@ export async function findOrCreateGameServer(userId: string) {
       status: "waiting",
       current_turn: "player1",
       board_state: boardState,
-      game_type: "random",
+      game_type: gameType,
     })
     .select()
     .single()

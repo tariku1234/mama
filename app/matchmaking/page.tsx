@@ -1,26 +1,58 @@
-import { redirect } from "next/navigation"
-import { createClient } from "@/lib/supabase/server"
-import { findOrCreateGameServer } from "@/lib/matchmaking-server"
-import { MatchmakingClient } from "./matchmaking-client"
+'use client'
 
-export default async function MatchmakingPage() {
-  const supabase = await createClient()
+import { useEffect, useState, Suspense } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
+import { MatchmakingClient } from './matchmaking-client'
+import { findOrCreateGame } from './actions'
 
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
+function Matchmaking() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const gameType = searchParams.get('gameType') || 'soldier'
+  const [gameId, setGameId] = useState<string | null>(null)
+  const [userId, setUserId] = useState<string | null>(null)
 
-  if (authError || !user) {
-    redirect("/auth/login?redirect=/matchmaking")
+  useEffect(() => {
+    const initialize = async () => {
+      try {
+        const game = await findOrCreateGame(gameType)
+
+        if (game.status === 'active') {
+          router.push(`/game/${game.id}`)
+        } else {
+          setGameId(game.id)
+          setUserId(game.player1_id)
+        }
+      } catch (error) {
+        console.error('Error finding or creating game:', error)
+        router.push('/lobby')
+      }
+    }
+
+    initialize()
+  }, [gameType, router])
+
+  if (!gameId || !userId) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-amber-50 to-orange-100 dark:from-amber-950 dark:to-orange-950 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
+      </div>
+    )
   }
 
-  const game = await findOrCreateGameServer(user.id)
+  return <MatchmakingClient gameId={gameId} userId={userId} />
+}
 
-  // If game is already active (matched immediately), redirect to game
-  if (game.status === "active") {
-    redirect(`/game/${game.id}`)
-  }
-
-  return <MatchmakingClient gameId={game.id} userId={user.id} />
+export default function MatchmakingPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-gradient-to-br from-amber-50 to-orange-100 dark:from-amber-950 dark:to-orange-950 flex items-center justify-center">
+          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
+        </div>
+      }
+    >
+      <Matchmaking />
+    </Suspense>
+  )
 }

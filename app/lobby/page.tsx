@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import Link from "next/link"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 export default async function LobbyPage() {
   const supabase = await createClient()
@@ -44,9 +45,21 @@ export default async function LobbyPage() {
               <CardDescription>Find a random opponent and start playing immediately</CardDescription>
             </CardHeader>
             <CardContent>
-              <Button asChild className="w-full" size="lg">
-                <Link href="/matchmaking">Find Opponent</Link>
-              </Button>
+              <form action="/matchmaking" className="space-y-4">
+                <Select name="gameType" defaultValue="soldier">
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a game mode" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="soldier">Soldier</SelectItem>
+                    <SelectItem value="tank">Tank</SelectItem>
+                    {/* Add more game modes as needed */}
+                  </SelectContent>
+                </Select>
+                <Button type="submit" className="w-full" size="lg">
+                  Find Opponent
+                </Button>
+              </form>
             </CardContent>
           </Card>
 
