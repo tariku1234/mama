@@ -8,12 +8,17 @@ import { findOrCreateGame } from './actions'
 function Matchmaking() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const gameType = searchParams.get('gameType') || 'soldier'
+  const gameType = searchParams.get('gameType')
   const [gameId, setGameId] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
 
   useEffect(() => {
     const initialize = async () => {
+      if (!gameType) {
+        console.error("No game type specified")
+        router.push('/lobby')
+        return;
+      }
       try {
         const game = await findOrCreateGame(gameType)
 

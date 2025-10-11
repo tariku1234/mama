@@ -45,7 +45,7 @@ export default async function LobbyPage() {
               <CardDescription>Find a random opponent and start playing immediately</CardDescription>
             </CardHeader>
             <CardContent>
-              <form action="/matchmaking" className="space-y-4">
+              <form action="/matchmaking" method="GET" className="space-y-4">
                 <Select name="gameType" defaultValue="soldier">
                   <SelectTrigger>
                     <SelectValue placeholder="Select a game mode" />
@@ -104,7 +104,7 @@ export default async function LobbyPage() {
               </div>
               <div className="text-center p-4 bg-muted rounded-lg">
                 <div className="text-3xl font-bold text-red-600">{profile?.losses || 0}</div>
-                <div className="text-sm text-muted-foreground">Losses</div>
+                <div className_name="text-sm text-muted-foreground">Losses</div>
               </div>
               <div className="text-center p-4 bg-muted rounded-lg">
                 <div className="text-3xl font-bold text-blue-600">{profile?.draws || 0}</div>
