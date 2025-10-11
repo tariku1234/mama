@@ -16,7 +16,7 @@ export function MatchmakingClient({ gameId, userId }: MatchmakingClientProps) {
   const supabase = createClient()
 
   useEffect(() => {
-    // Subscribe to game updates
+    // Subscribe to game updates for real-time feedback
     const channel = supabase
       .channel(`matchmaking:${gameId}`)
       .on(
@@ -29,17 +29,34 @@ export function MatchmakingClient({ gameId, userId }: MatchmakingClientProps) {
         },
         (payload) => {
           const game = payload.new as { status: string; id: string }
-
           if (game.status === "active") {
-            // Game started, redirect to game page
             router.push(`/game/${game.id}`)
           }
         },
       )
       .subscribe()
 
+    // Polling as a fallback for missed real-time events
+    const pollInterval = setInterval(async () => {
+      const { data: game, error } = await supabase
+        .from("games")
+        .select("status, id")
+        .eq("id", gameId)
+        .single()
+
+      if (error) {
+        console.error("Error polling for game status:", error)
+        return
+      }
+
+      if (game && game.status === "active") {
+        router.push(`/game/${game.id}`)
+      }
+    }, 3000) // Poll every 3 seconds
+
     return () => {
       supabase.removeChannel(channel)
+      clearInterval(pollInterval)
     }
   }, [gameId, router, supabase])
 
