@@ -20,7 +20,8 @@ function Matchmaking() {
         return;
       }
       try {
-        const game = await findOrCreateGame(gameType)
+        const data = await findOrCreateGame(gameType)
+        const game = data.game
 
         if (game.status === 'active') {
           router.push(`/game/${game.id}`)

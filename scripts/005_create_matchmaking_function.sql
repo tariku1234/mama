@@ -33,9 +33,9 @@ BEGIN
   END IF;
 
   -- If no waiting game, create a new one
-  initial_board := '{"pieces": [], "moves": []}'; -- Placeholder, will be replaced by actual initial board state
-  INSERT INTO games (player1_id, game_type, status, board_state)
-  VALUES (p_user_id, p_game_type, 'waiting', initial_board)
+  initial_board := '{"pieces": [], "moves": [], "currentTurn": "light"}';
+  INSERT INTO games (player1_id, game_type, status, board_state, current_turn)
+  VALUES (p_user_id, p_game_type, 'waiting', initial_board, 'player1')
   RETURNING id INTO new_game_id;
 
   SELECT *
