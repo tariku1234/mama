@@ -1,7 +1,6 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
-import { findOrCreateGameServer } from '@/lib/matchmaking-server'
 import { redirect } from 'next/navigation'
 
 export async function findOrCreateGame(gameType: string) {
@@ -14,5 +13,15 @@ export async function findOrCreateGame(gameType: string) {
     redirect('/auth/login')
   }
 
-  return findOrCreateGameServer(user.id, gameType)
+  const { data, error } = await supabase.rpc('find_or_create_game', {
+    p_user_id: user.id,
+    p_game_type: gameType,
+  })
+
+  if (error) {
+    console.error('Error finding or creating game:', error)
+    throw new Error('Failed to find or create game.')
+  }
+
+  return data
 }
