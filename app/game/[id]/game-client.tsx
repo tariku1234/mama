@@ -26,11 +26,21 @@ interface GameClientProps {
 }
 
 export function GameClient({ gameId, userId, player1, player2, initialGameStatus }: GameClientProps) {
-  const { game, pieces, currentTurn, validMoves, playerColor, isLoading, error, makeMove, resignGame, offerDraw } =
-    useMultiplayerGame(gameId, userId)
+  const {
+    game,
+    pieces,
+    currentTurn,
+    validMoves,
+    playerColor,
+    isLoading,
+    error,
+    selectedPiece,
+    handleSquareClick,
+    resignGame,
+    offerDraw,
+  } = useMultiplayerGame(gameId, userId)
   const router = useRouter()
 
-  // Redirect if game is completed
   useEffect(() => {
     if (game?.status === "completed") {
       setTimeout(() => {
@@ -70,8 +80,7 @@ export function GameClient({ gameId, userId, player1, player2, initialGameStatus
   const currentPlayer = isPlayer1 ? player1 : player2
   const opponent = isPlayer1 ? player2 : player1
 
-  const isPlayerTurn =
-    (playerColor === "light" && currentTurn === "light") || (playerColor === "dark" && currentTurn === "dark")
+  const isPlayerTurn = playerColor === currentTurn
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 to-orange-100 dark:from-amber-950 dark:to-orange-950 p-4 md:p-6">
@@ -125,8 +134,9 @@ export function GameClient({ gameId, userId, player1, player2, initialGameStatus
             <GameBoard
               pieces={pieces}
               currentTurn={currentTurn}
-              onMove={makeMove}
+              handleSquareClick={handleSquareClick}
               highlightedSquares={validMoves}
+              selectedPiece={selectedPiece}
               playerColor={playerColor}
               disabled={game.status !== "active" || !opponent}
             />
