@@ -6,7 +6,6 @@ import type { Piece, PieceColor } from "@/components/game-board"
 import { executeMove, getValidMoves, GameType, hasPlayerLost } from "@/lib/game-logic"
 import type { RealtimeChannel } from "@supabase/supabase-js"
 
-// The board_state can be null if the game is waiting for a second player
 interface GameData {
   id: string
   player1_id: string
@@ -33,32 +32,24 @@ export function useMultiplayerGame(gameId: string, userId: string) {
   const supabase = createClient()
   const gameType = game?.game_type ?? "soldier"
 
-  // Handles loading the initial game state
   useEffect(() => {
     async function loadGame() {
       if (!gameId || !userId) {
         setIsLoading(false)
         return
       }
-
       try {
         const { data, error } = await supabase.from("games").select("*").eq("id", gameId).single()
         if (error) throw error
         if (!data) throw new Error("Game not found")
-
         const gameData = data as GameData
         setGame(gameData)
-
         const color = gameData.player1_id === userId ? "light" : "dark"
         setPlayerColor(color)
-
-        // If board_state exists (game is active or a pre-initialized private game), load it.
-        // If the game is 'waiting', board_state will be null, and pieces will remain an empty array.
         if (gameData.board_state) {
           setPieces(gameData.board_state.pieces)
           setCurrentTurn(gameData.board_state.currentTurn)
         }
-
         setIsLoading(false)
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load game")
@@ -68,40 +59,38 @@ export function useMultiplayerGame(gameId: string, userId: string) {
     loadGame()
   }, [gameId, userId, supabase])
 
-  // Handles real-time updates to the game
   useEffect(() => {
     if (isLoading || !gameId) return
 
-    const channel = supabase
-      .channel(`game:${gameId}`)
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "games", filter: `id=eq.${gameId}` },
-        (payload) => {
-          const updatedGame = payload.new as GameData
-          setGame(updatedGame)
-
-          // When the game becomes active, the board_state will be populated by the server.
-          // This will update the state for the waiting player.
-          if (updatedGame.board_state) {
-            setPieces(updatedGame.board_state.pieces)
-            setCurrentTurn(updatedGame.board_state.currentTurn)
-          }
-
-          if (updatedGame.current_turn !== playerColor) {
-            setSelectedPiece(null)
-            setValidMoves([])
-          }
-        },
-      )
-      .subscribe()
+    const channel = supabase.channel(`game:${gameId}`).on("postgres_changes", { event: "UPDATE", schema: "public", table: "games", filter: `id=eq.${gameId}` }, (payload) => {
+      const updatedGame = payload.new as GameData
+      setGame(updatedGame)
+      if (updatedGame.board_state) {
+        setPieces(updatedGame.board_state.pieces)
+        setCurrentTurn(updatedGame.board_state.currentTurn)
+      }
+      if (updatedGame.current_turn !== playerColor) {
+        setSelectedPiece(null)
+        setValidMoves([])
+      }
+    }).subscribe()
 
     return () => { supabase.removeChannel(channel) }
   }, [gameId, isLoading, supabase, playerColor])
 
+  // Adds a timeout for matchmaking
+  useEffect(() => {
+    if (game?.status === 'waiting' && !game.player2_id) {
+      const timer = setTimeout(() => {
+        setError("No opponent found. Please try again later.")
+      }, 15000) // 15-second timeout
+
+      return () => clearTimeout(timer)
+    }
+  }, [game])
+
   const makeMove = useCallback(async (piece: Piece, newPosition: { row: number; col: number }) => {
     if (!game || game.status !== "active" || !piece) return
-
     const updatedPieces = executeMove(pieces, piece.id, newPosition, gameType)
     const opponentColor = currentTurn === "light" ? "dark" : "light"
 
@@ -114,16 +103,15 @@ export function useMultiplayerGame(gameId: string, userId: string) {
     let nextTurn = currentTurn === "light" ? "dark" : "light"
     const movedPiece = updatedPieces.find((p) => p.id === piece.id)
     if (movedPiece && Math.abs(newPosition.row - piece.position.row) > 1) {
-        const additionalCaptures = getValidMoves(movedPiece, updatedPieces, gameType)
-        if (additionalCaptures.some(move => Math.abs(move.row - movedPiece.position.row) > 1)) {
-            nextTurn = currentTurn // It's a multi-jump, keep the turn
-        }
+      const additionalCaptures = getValidMoves(movedPiece, updatedPieces, gameType)
+      if (additionalCaptures.some(move => Math.abs(move.row - movedPiece.position.row) > 1)) {
+        nextTurn = currentTurn
+      }
     }
 
     try {
       const { error } = await supabase.from("games").update({ board_state: { pieces: updatedPieces, currentTurn: nextTurn }, current_turn: nextTurn }).eq("id", gameId)
       if (error) throw error
-      // State will be updated via the realtime subscription, no need to set it locally
     } catch (err) {
       setError("Failed to make move")
     }
@@ -136,7 +124,7 @@ export function useMultiplayerGame(gameId: string, userId: string) {
       const isValidMove = validMoves.some((move) => move.row === row && move.col === col)
       if (isValidMove) {
         makeMove(selectedPiece, { row, col })
-        setSelectedPiece(null) // Deselect after making a move
+        setSelectedPiece(null)
         setValidMoves([])
       } else if (pieceAtSquare && pieceAtSquare.color === playerColor) {
         setSelectedPiece(pieceAtSquare)

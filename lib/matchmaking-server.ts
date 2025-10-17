@@ -5,7 +5,6 @@ import { initializeBoard, GameType } from "@/lib/game-logic"
 export async function createPrivateGameServer(userId: string) {
   const supabase = await createClient()
 
-  // For private games, we'll default to "soldier" mode and initialize the board immediately.
   const gameType: GameType = "soldier"
   const initialBoard = initializeBoard(gameType)
   const boardState = {
@@ -13,14 +12,13 @@ export async function createPrivateGameServer(userId: string) {
     currentTurn: "light" as const,
   }
 
-  // Generate a random 6-character invite code
   const inviteCode = Math.random().toString(36).substring(2, 8).toUpperCase()
 
   const { data: newGame, error: createError } = await supabase
     .from("games")
     .insert({
       player1_id: userId,
-      status: "waiting", // Waiting for player 2 to join via invite code
+      status: "waiting",
       current_turn: "light",
       board_state: boardState,
       game_type: gameType,
@@ -50,27 +48,18 @@ export async function findOrCreateQuickGame(userId: string, gameType: GameType) 
     .limit(1)
     .single()
 
-  // PGRST116 means no rows were found, which is not an error in this case.
   if (findError && findError.code !== 'PGRST116') {
     console.error("Error finding waiting game:", findError.message)
     throw new Error("Failed to find a game.")
   }
 
-  // 2. If a waiting game is found, join it and start the game
+  // 2. If a waiting game is found, join it and activate it
   if (waitingGame) {
-    const initialBoard = initializeBoard(gameType)
-    const boardState = {
-      pieces: initialBoard,
-      currentTurn: "light" as const,
-    }
-
     const { data: updatedGame, error: updateError } = await supabase
       .from("games")
       .update({
         player2_id: userId,
-        status: "active",
-        board_state: boardState, // Initialize board now
-        current_turn: "light",
+        status: "active", // The game is now active!
       })
       .eq("id", waitingGame.id)
       .select("id")
@@ -84,7 +73,13 @@ export async function findOrCreateQuickGame(userId: string, gameType: GameType) 
     return updatedGame
   }
 
-  // 3. If no game is found, create a new one in a 'waiting' state
+  // 3. If no game is found, create a new one with an initialized board and wait
+  const initialBoard = initializeBoard(gameType)
+  const boardState = {
+    pieces: initialBoard,
+    currentTurn: "light" as const,
+  }
+
   const { data: newGame, error: createError } = await supabase
     .from("games")
     .insert({
@@ -92,7 +87,7 @@ export async function findOrCreateQuickGame(userId: string, gameType: GameType) 
       status: "waiting",
       game_type: gameType,
       current_turn: "light",
-      // board_state is null, will be initialized when player 2 joins
+      board_state: boardState, // Initialize the board now
     })
     .select("id")
     .single()
