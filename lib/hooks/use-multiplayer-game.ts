@@ -3,16 +3,17 @@
 import { useEffect, useState, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
 import type { Piece, PieceColor } from "@/components/game-board"
-import { executeMove, getValidMoves, GameType, initializeBoard, hasPlayerLost } from "@/lib/game-logic"
+import { executeMove, getValidMoves, GameType, hasPlayerLost } from "@/lib/game-logic"
 import type { RealtimeChannel } from "@supabase/supabase-js"
 
+// The board_state can be null if the game is waiting for a second player
 interface GameData {
   id: string
   player1_id: string
   player2_id: string | null
   status: string
   current_turn: PieceColor
-  board_state: { pieces: Piece[]; currentTurn: PieceColor }
+  board_state: { pieces: Piece[]; currentTurn: PieceColor } | null
   player1_time: number
   player2_time: number
   winner_id: string | null
@@ -32,8 +33,14 @@ export function useMultiplayerGame(gameId: string, userId: string) {
   const supabase = createClient()
   const gameType = game?.game_type ?? "soldier"
 
+  // Handles loading the initial game state
   useEffect(() => {
     async function loadGame() {
+      if (!gameId || !userId) {
+        setIsLoading(false)
+        return
+      }
+
       try {
         const { data, error } = await supabase.from("games").select("*").eq("id", gameId).single()
         if (error) throw error
@@ -41,19 +48,17 @@ export function useMultiplayerGame(gameId: string, userId: string) {
 
         const gameData = data as GameData
         setGame(gameData)
+
         const color = gameData.player1_id === userId ? "light" : "dark"
         setPlayerColor(color)
 
-        if (!gameData.board_state || gameData.board_state.pieces.length === 0) {
-          const initialPieces = initializeBoard(gameData.game_type)
-          setPieces(initialPieces)
-          setCurrentTurn("light")
-          await supabase.from("games").update({ board_state: { pieces: initialPieces, currentTurn: "light" } }).eq("id", gameId)
-        } else {
-          const gameState = gameData.board_state
-          setPieces(gameState.pieces)
-          setCurrentTurn(gameState.currentTurn)
+        // If board_state exists (game is active or a pre-initialized private game), load it.
+        // If the game is 'waiting', board_state will be null, and pieces will remain an empty array.
+        if (gameData.board_state) {
+          setPieces(gameData.board_state.pieces)
+          setCurrentTurn(gameData.board_state.currentTurn)
         }
+
         setIsLoading(false)
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load game")
@@ -63,19 +68,34 @@ export function useMultiplayerGame(gameId: string, userId: string) {
     loadGame()
   }, [gameId, userId, supabase])
 
+  // Handles real-time updates to the game
   useEffect(() => {
-    if (isLoading) return
-    const channel = supabase.channel(`game:${gameId}`).on("postgres_changes", { event: "UPDATE", schema: "public", table: "games", filter: `id=eq.${gameId}` }, (payload) => {
-      const updatedGame = payload.new as GameData
-      setGame(updatedGame)
-      const gameState = updatedGame.board_state
-      setPieces(gameState.pieces)
-      setCurrentTurn(gameState.currentTurn)
-      if (updatedGame.current_turn !== playerColor) {
-        setSelectedPiece(null)
-        setValidMoves([])
-      }
-    }).subscribe()
+    if (isLoading || !gameId) return
+
+    const channel = supabase
+      .channel(`game:${gameId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "games", filter: `id=eq.${gameId}` },
+        (payload) => {
+          const updatedGame = payload.new as GameData
+          setGame(updatedGame)
+
+          // When the game becomes active, the board_state will be populated by the server.
+          // This will update the state for the waiting player.
+          if (updatedGame.board_state) {
+            setPieces(updatedGame.board_state.pieces)
+            setCurrentTurn(updatedGame.board_state.currentTurn)
+          }
+
+          if (updatedGame.current_turn !== playerColor) {
+            setSelectedPiece(null)
+            setValidMoves([])
+          }
+        },
+      )
+      .subscribe()
+
     return () => { supabase.removeChannel(channel) }
   }, [gameId, isLoading, supabase, playerColor])
 
@@ -91,36 +111,19 @@ export function useMultiplayerGame(gameId: string, userId: string) {
       return;
     }
 
-    const movedPiece = updatedPieces.find((p) => p.id === piece.id)
     let nextTurn = currentTurn === "light" ? "dark" : "light"
-    let isMultiJump = false
-
+    const movedPiece = updatedPieces.find((p) => p.id === piece.id)
     if (movedPiece && Math.abs(newPosition.row - piece.position.row) > 1) {
-      const additionalCaptures = getValidMoves(movedPiece, updatedPieces, gameType)
-      if (additionalCaptures.length > 0) {
-        const firstCapture = additionalCaptures[0]
-        const rowDiff = Math.abs(firstCapture.row - movedPiece.position.row)
-        if (rowDiff > 1) {
-          isMultiJump = true
-          nextTurn = currentTurn
+        const additionalCaptures = getValidMoves(movedPiece, updatedPieces, gameType)
+        if (additionalCaptures.some(move => Math.abs(move.row - movedPiece.position.row) > 1)) {
+            nextTurn = currentTurn // It's a multi-jump, keep the turn
         }
-      }
     }
 
     try {
       const { error } = await supabase.from("games").update({ board_state: { pieces: updatedPieces, currentTurn: nextTurn }, current_turn: nextTurn }).eq("id", gameId)
       if (error) throw error
-
-      if (isMultiJump) {
-        const movedPieceAgain = updatedPieces.find((p) => p.id === piece.id)
-        if (movedPieceAgain) {
-          setSelectedPiece(movedPieceAgain)
-          setValidMoves(getValidMoves(movedPieceAgain, updatedPieces, gameType))
-        }
-      } else {
-        setSelectedPiece(null)
-        setValidMoves([])
-      }
+      // State will be updated via the realtime subscription, no need to set it locally
     } catch (err) {
       setError("Failed to make move")
     }
@@ -133,6 +136,8 @@ export function useMultiplayerGame(gameId: string, userId: string) {
       const isValidMove = validMoves.some((move) => move.row === row && move.col === col)
       if (isValidMove) {
         makeMove(selectedPiece, { row, col })
+        setSelectedPiece(null) // Deselect after making a move
+        setValidMoves([])
       } else if (pieceAtSquare && pieceAtSquare.color === playerColor) {
         setSelectedPiece(pieceAtSquare)
         setValidMoves(getValidMoves(pieceAtSquare, pieces, gameType))
