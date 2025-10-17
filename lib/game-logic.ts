@@ -1,4 +1,6 @@
-import type { Piece, PieceColor } from "@/components/game-board"
+import type { Piece, PieceColor, PieceType } from "@/components/game-board"
+
+export type GameType = "soldier" | "tank"
 
 export interface Position {
   row: number
@@ -8,50 +10,7 @@ export interface Position {
 export interface Move {
   from: Position
   to: Position
-  capturedPieces?: Position[]
-}
-
-export interface GameState {
-  pieces: Piece[]
-  currentTurn: PieceColor
-  winner?: PieceColor
-  isDraw?: boolean
-}
-
-// Initialize the game board with starting pieces
-export function initializeBoard(): Piece[] {
-  const pieces: Piece[] = []
-  let pieceId = 0
-
-  // Dark pieces (top 3 rows)
-  for (let row = 0; row < 3; row++) {
-    for (let col = 0; col < 8; col++) {
-      if ((row + col) % 2 === 1) {
-        pieces.push({
-          id: `piece-${pieceId++}`,
-          type: "regular",
-          color: "dark",
-          position: { row, col },
-        })
-      }
-    }
-  }
-
-  // Light pieces (bottom 3 rows)
-  for (let row = 5; row < 8; row++) {
-    for (let col = 0; col < 8; col++) {
-      if ((row + col) % 2 === 1) {
-        pieces.push({
-          id: `piece-${pieceId++}`,
-          type: "regular",
-          color: "light",
-          position: { row, col },
-        })
-      }
-    }
-  }
-
-  return pieces
+  capturedPiecePos?: Position
 }
 
 // Check if a position is within board bounds
@@ -64,194 +23,241 @@ function getPieceAt(pieces: Piece[], pos: Position): Piece | undefined {
   return pieces.find((p) => p.position.row === pos.row && p.position.col === pos.col)
 }
 
-// Calculate all possible moves for a piece
-export function getValidMoves(piece: Piece, pieces: Piece[]): Position[] {
+// --- Move Calculation ---
+
+function getRegularMoves(piece: Piece, pieces: Piece[]): Position[] {
   const moves: Position[] = []
-  const captures = getCaptureMovesForPiece(piece, pieces)
-
-  // If there are capture moves available, only return those (forced capture rule)
-  if (captures.length > 0) {
-    return captures.map((move) => move.to)
-  }
-
-  // Regular moves (non-capturing)
-  const directions = getDirections(piece)
+  const directions = piece.color === "light"
+    ? [{ row: -1, col: -1 }, { row: -1, col: 1 }]
+    : [{ row: 1, col: -1 }, { row: 1, col: 1 }]
 
   for (const dir of directions) {
     const newPos = { row: piece.position.row + dir.row, col: piece.position.col + dir.col }
-
     if (isValidPosition(newPos) && !getPieceAt(pieces, newPos)) {
       moves.push(newPos)
     }
   }
-
   return moves
 }
 
-// Get movement directions based on piece type and color
-function getDirections(piece: Piece): Position[] {
-  if (piece.type === "king") {
-    // Kings can move in all diagonal directions
-    return [
-      { row: -1, col: -1 },
-      { row: -1, col: 1 },
-      { row: 1, col: -1 },
-      { row: 1, col: 1 },
-    ]
-  } else {
-    // Regular pieces move forward only
-    if (piece.color === "light") {
-      return [
-        { row: -1, col: -1 },
-        { row: -1, col: 1 },
-      ]
-    } else {
-      return [
-        { row: 1, col: -1 },
-        { row: 1, col: 1 },
-      ]
-    }
-  }
-}
-
-// Get all capture directions (including backward for regular pieces)
-function getAllCaptureDirections(): Position[] {
-  return [
-    { row: -1, col: -1 },
-    { row: -1, col: 1 },
-    { row: 1, col: -1 },
-    { row: 1, col: 1 },
-  ]
-}
-
-// Calculate capture moves for a specific piece
-function getCaptureMovesForPiece(piece: Piece, pieces: Piece[]): Move[] {
-  const captureMoves: Move[] = []
-  const directions = getAllCaptureDirections()
+function getFlyingKingMoves(piece: Piece, pieces: Piece[]): Position[] {
+  const moves: Position[] = []
+  const directions = [{ row: -1, col: -1 }, { row: -1, col: 1 }, { row: 1, col: -1 }, { row: 1, col: 1 }]
 
   for (const dir of directions) {
-    const jumpOver = { row: piece.position.row + dir.row, col: piece.position.col + dir.col }
-    const landOn = { row: piece.position.row + dir.row * 2, col: piece.position.col + dir.col * 2 }
-
-    if (!isValidPosition(jumpOver) || !isValidPosition(landOn)) continue
-
-    const pieceToJump = getPieceAt(pieces, jumpOver)
-    const landingPiece = getPieceAt(pieces, landOn)
-
-    // Can capture if there's an opponent piece to jump over and landing square is empty
-    if (pieceToJump && pieceToJump.color !== piece.color && !landingPiece) {
-      captureMoves.push({
-        from: piece.position,
-        to: landOn,
-        capturedPieces: [jumpOver],
-      })
+    let currentPos = { row: piece.position.row + dir.row, col: piece.position.col + dir.col }
+    while (isValidPosition(currentPos) && !getPieceAt(pieces, currentPos)) {
+      moves.push(currentPos)
+      currentPos = { row: currentPos.row + dir.row, col: currentPos.col + dir.col }
     }
   }
-
-  return captureMoves
+  return moves
 }
 
-// Check if any piece of a color has capture moves available
-export function hasCaptureMoves(pieces: Piece[], color: PieceColor): boolean {
-  return pieces.some((piece) => piece.color === color && getCaptureMovesForPiece(piece, pieces).length > 0)
+function getRegularCaptures(piece: Piece, pieces: Piece[], gameType: GameType): Move[] {
+  const captures: Move[] = []
+  const directions = [{ row: -1, col: -1 }, { row: -1, col: 1 }, { row: 1, col: -1 }, { row: 1, col: 1 }]
+
+  for (const dir of directions) {
+    const jumpOverPos = { row: piece.position.row + dir.row, col: piece.position.col + dir.col }
+    const landOnPos = { row: piece.position.row + dir.row * 2, col: piece.position.col + dir.col * 2 }
+
+    if (!isValidPosition(landOnPos)) continue
+
+    const pieceToJump = getPieceAt(pieces, jumpOverPos)
+    const isLandingSquareEmpty = !getPieceAt(pieces, landOnPos)
+
+    if (pieceToJump && pieceToJump.color !== piece.color && isLandingSquareEmpty) {
+      if (gameType === "soldier" && piece.type === "regular" && pieceToJump.type === "king") {
+        continue // Regular pieces cannot capture kings in Soldier mode
+      }
+      captures.push({ from: piece.position, to: landOnPos, capturedPiecePos: jumpOverPos })
+    }
+  }
+  return captures
 }
 
-// Get all valid moves for all pieces of a color
-export function getAllValidMovesForColor(pieces: Piece[], color: PieceColor): Map<string, Position[]> {
-  const movesMap = new Map<string, Position[]>()
-  const hasCapturesAvailable = hasCaptureMoves(pieces, color)
+function getFlyingKingCaptures(piece: Piece, pieces: Piece[]): Move[] {
+  const captures: Move[] = []
+  const directions = [{ row: -1, col: -1 }, { row: -1, col: 1 }, { row: 1, col: -1 }, { row: 1, col: 1 }]
 
-  for (const piece of pieces) {
-    if (piece.color === color) {
-      if (hasCapturesAvailable) {
-        // Only return capture moves if any are available
-        const captures = getCaptureMovesForPiece(piece, pieces)
-        if (captures.length > 0) {
-          movesMap.set(
-            piece.id,
-            captures.map((m) => m.to),
-          )
+  for (const dir of directions) {
+    for (let i = 1; ; i++) {
+      const jumpOverPos = { row: piece.position.row + dir.row * i, col: piece.position.col + dir.col * i }
+      if (!isValidPosition(jumpOverPos)) break
+
+      const pieceToJump = getPieceAt(pieces, jumpOverPos)
+      if (pieceToJump) {
+        if (pieceToJump.color !== piece.color) {
+          // Found a piece to capture. Check for empty landing squares behind it.
+          for (let j = i + 1; ; j++) {
+            const landOnPos = { row: piece.position.row + dir.row * j, col: piece.position.col + dir.col * j }
+            if (!isValidPosition(landOnPos) || getPieceAt(pieces, landOnPos)) {
+              break // Path is blocked after capture
+            }
+            captures.push({ from: piece.position, to: landOnPos, capturedPiecePos: jumpOverPos })
+          }
         }
-      } else {
-        // Return regular moves
-        const moves = getValidMoves(piece, pieces)
-        if (moves.length > 0) {
-          movesMap.set(piece.id, moves)
-        }
+        break // Path is blocked by a piece
       }
     }
   }
-
-  return movesMap
+  return captures
 }
 
-// Execute a move and return updated pieces
-export function executeMove(pieces: Piece[], pieceId: string, newPosition: Position): Piece[] {
-  const updatedPieces = [...pieces]
-  const pieceIndex = updatedPieces.findIndex((p) => p.id === pieceId)
+export function getValidMoves(piece: Piece, pieces: Piece[], gameType: GameType): Position[] {
+  let captures: Move[] = []
+  if (gameType === "tank") {
+    // In Tank mode, all pieces are effectively kings for movement/capture
+    captures = getFlyingKingCaptures(piece, pieces)
+  } else { // Soldier mode
+    captures = piece.type === "king" 
+      ? getFlyingKingCaptures(piece, pieces) 
+      : getRegularCaptures(piece, pieces, gameType)
+  }
 
-  if (pieceIndex === -1) return pieces
+  // Forced capture rule
+  const allPlayerPieces = pieces.filter(p => p.color === piece.color)
+  const anyCaptureAvailable = allPlayerPieces.some(p => {
+    if (gameType === "tank" || p.type === "king") {
+        return getFlyingKingCaptures(p, pieces).length > 0
+    }
+    return getRegularCaptures(p, pieces, gameType).length > 0
+  })
 
-  const piece = updatedPieces[pieceIndex]
-  const oldPosition = piece.position
+  if (anyCaptureAvailable) {
+    return captures.map((move) => move.to)
+  }
 
-  // Check if this is a capture move
-  const rowDiff = Math.abs(newPosition.row - oldPosition.row)
-  const colDiff = Math.abs(newPosition.col - oldPosition.col)
+  // Regular moves if no captures are available
+  if (gameType === "tank" || piece.type === "king") {
+    return getFlyingKingMoves(piece, pieces)
+  }
+  return getRegularMoves(piece, pieces)
+}
 
-  if (rowDiff === 2 && colDiff === 2) {
-    // This is a capture - remove the jumped piece
-    const capturedRow = (oldPosition.row + newPosition.row) / 2
-    const capturedCol = (oldPosition.col + newPosition.col) / 2
-    const capturedIndex = updatedPieces.findIndex(
-      (p) => p.position.row === capturedRow && p.position.col === capturedCol,
-    )
+// --- Game State Modification ---
 
-    if (capturedIndex !== -1) {
-      updatedPieces.splice(capturedIndex, 1)
+export function executeMove(
+  pieces: Piece[],
+  pieceId: string,
+  newPosition: Position,
+  gameType: GameType,
+): Piece[] {
+  const pieceToMove = pieces.find((p) => p.id === pieceId)
+  if (!pieceToMove) return pieces
+
+  const oldPosition = pieceToMove.position
+  const rowDiff = newPosition.row - oldPosition.row
+  const colDiff = newPosition.col - oldPosition.col
+  
+  let capturedPiecePos: Position | undefined = undefined;
+  
+  // Check if it's a capture move
+  if (Math.abs(rowDiff) > 1) {
+    if(pieceToMove.type === 'king' || gameType === 'tank'){
+        // Flying King Capture
+        const dir = { row: Math.sign(rowDiff), col: Math.sign(colDiff) };
+        for (let i = 1; i < Math.abs(rowDiff); i++) {
+            const pos = { row: oldPosition.row + dir.row * i, col: oldPosition.col + dir.col * i };
+            const jumpedPiece = getPieceAt(pieces, pos);
+            if (jumpedPiece) {
+                capturedPiecePos = pos;
+                break;
+            }
+        }
+    } else {
+        // Regular Capture
+        capturedPiecePos = {
+            row: oldPosition.row + rowDiff / 2,
+            col: oldPosition.col + colDiff / 2,
+        };
     }
   }
 
-  // Update piece position
-  updatedPieces[pieceIndex] = {
-    ...piece,
-    position: newPosition,
-    // Promote to king if reaching opposite end
-    type:
-      (piece.color === "light" && newPosition.row === 0) || (piece.color === "dark" && newPosition.row === 7)
-        ? "king"
-        : piece.type,
+  // Remove the captured piece
+  let updatedPieces = pieces;
+  if(capturedPiecePos){
+      updatedPieces = pieces.filter(p => !(p.position.row === capturedPiecePos?.row && p.position.col === capturedPiecePos?.col));
   }
+
+  // Find the piece again in the potentially updated array
+  const pieceIndex = updatedPieces.findIndex((p) => p.id === pieceId)
+  if (pieceIndex === -1) return updatedPieces; // Should not happen if logic is correct
+  
+  const piece = { ...updatedPieces[pieceIndex], position: newPosition };
+
+  // Promote to king if applicable (only in Soldier mode)
+  if (gameType === "soldier" && piece.type === "regular") {
+    if ((piece.color === "light" && newPosition.row === 0) || (piece.color === "dark" && newPosition.row === 7)) {
+      piece.type = "king"
+    }
+  }
+
+  updatedPieces[pieceIndex] = piece;
 
   return updatedPieces
 }
 
-// Check for win condition
-export function checkWinCondition(pieces: Piece[], currentTurn: PieceColor): PieceColor | null {
-  const lightPieces = pieces.filter((p) => p.color === "light")
-  const darkPieces = pieces.filter((p) => p.color === "dark")
+// --- Board Initialization ---
 
-  // Win by elimination
-  if (lightPieces.length === 0) return "dark"
-  if (darkPieces.length === 0) return "light"
+export function initializeBoard(gameType: GameType): Piece[] {
+    const pieces: Piece[] = []
+    let pieceId = 0
+  
+    const pieceType: PieceType = gameType === 'tank' ? 'king' : 'regular';
 
-  // Win by no valid moves (stalemate = loss for current player)
-  const currentPlayerPieces = pieces.filter((p) => p.color === currentTurn)
-  const hasValidMoves = currentPlayerPieces.some((piece) => getValidMoves(piece, pieces).length > 0)
-
-  if (!hasValidMoves) {
-    return currentTurn === "light" ? "dark" : "light"
+    // Dark pieces
+    for (let row = 0; row < 3; row++) {
+      for (let col = 0; col < 8; col++) {
+        if ((row + col) % 2 === 1) {
+          pieces.push({
+            id: `piece-${pieceId++}`,
+            type: pieceType,
+            color: "dark",
+            position: { row, col },
+          })
+        }
+      }
+    }
+  
+    // Light pieces
+    for (let row = 5; row < 8; row++) {
+      for (let col = 0; col < 8; col++) {
+        if ((row + col) % 2 === 1) {
+          pieces.push({
+            id: `piece-${pieceId++}`,
+            type: pieceType,
+            color: "light",
+            position: { row, col },
+          })
+        }
+      }
+    }
+  
+    return pieces
   }
 
-  return null
-}
+// --- Game Over Detection ---
 
-// Convert game state to JSON for database storage
-export function serializeGameState(pieces: Piece[], currentTurn: PieceColor): string {
-  return JSON.stringify({ pieces, currentTurn })
-}
+export function hasPlayerLost(
+  pieces: Piece[],
+  playerColor: PieceColor,
+  gameType: GameType
+): boolean {
+  // Player loses if they have no pieces left
+  const playerPieces = pieces.filter((p) => p.color === playerColor);
+  if (playerPieces.length === 0) {
+    return true;
+  }
 
-// Parse game state from JSON
-export function deserializeGameState(json: string): { pieces: Piece[]; currentTurn: PieceColor } {
-  return JSON.parse(json)
+  // Player loses if they have pieces but no valid moves
+  const hasValidMoves = playerPieces.some(
+    (p) => getValidMoves(p, pieces, gameType).length > 0
+  );
+  if (!hasValidMoves) {
+    return true;
+  }
+
+  return false;
 }
